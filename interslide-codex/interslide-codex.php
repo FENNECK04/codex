@@ -105,16 +105,23 @@ function interslide_codex_render_page() {
         echo '<div class="' . esc_attr( $class ) . '"><p>' . esc_html( $notice ) . '</p></div>';
     }
 
-    $post_types    = interslide_codex_get_post_types();
-    $taxonomies    = interslide_codex_get_taxonomies();
-    $public_types  = get_post_types( array( 'public' => true ), 'objects' );
-    $support_items = interslide_codex_support_options();
+    $post_types     = interslide_codex_get_post_types();
+    $taxonomies     = interslide_codex_get_taxonomies();
+    $all_post_types = get_post_types( array(), 'objects' );
+    $support_items  = interslide_codex_support_options();
+
+    if ( ! is_array( $all_post_types ) ) {
+        $all_post_types = array();
+    }
+
+    ksort( $all_post_types );
 
     echo '<div class="wrap">';
     echo '<h1>' . esc_html__( 'Interslide Codex', 'interslide-codex' ) . '</h1>';
-    echo '<p>' . esc_html__( 'Create, rename, or delete custom post types and taxonomies. Built-in and third-party types can be viewed but not edited here.', 'interslide-codex' ) . '</p>';
+    echo '<p>' . esc_html__( 'Create, rename, or delete custom post types and taxonomies. Built-in and third-party items are listed for reference but can only be edited if created here.', 'interslide-codex' ) . '</p>';
+    echo '<p><strong>' . esc_html__( 'Field help:', 'interslide-codex' ) . '</strong> ' . esc_html__( 'Slug is the unique identifier used in URLs and code (lowercase, no spaces). Singular is the label for one item (e.g., "Project"). Plural is the label for multiple items (e.g., "Projects").', 'interslide-codex' ) . '</p>';
 
-    echo '<h2>' . esc_html__( 'Custom Post Types (created by this plugin)', 'interslide-codex' ) . '</h2>';
+    echo '<h2>' . esc_html__( 'Post Types', 'interslide-codex' ) . '</h2>';
     echo '<table class="widefat fixed striped">';
     echo '<thead><tr>';
     echo '<th>' . esc_html__( 'Slug', 'interslide-codex' ) . '</th>';
@@ -126,44 +133,57 @@ function interslide_codex_render_page() {
     echo '</tr></thead>';
     echo '<tbody>';
 
-    if ( empty( $post_types ) ) {
-        echo '<tr><td colspan="6">' . esc_html__( 'No custom post types created yet.', 'interslide-codex' ) . '</td></tr>';
+    if ( empty( $all_post_types ) ) {
+        echo '<tr><td colspan="6">' . esc_html__( 'No post types found.', 'interslide-codex' ) . '</td></tr>';
     } else {
-        foreach ( $post_types as $slug => $data ) {
+        foreach ( $all_post_types as $slug => $post_type_obj ) {
+            $managed = isset( $post_types[ $slug ] );
+            $data    = $managed ? $post_types[ $slug ] : array(
+                'singular' => $post_type_obj->labels->singular_name,
+                'plural'   => $post_type_obj->labels->name,
+                'supports' => array(),
+                'public'   => ! empty( $post_type_obj->public ),
+            );
             echo '<tr>';
             echo '<td>' . esc_html( $slug ) . '</td>';
             echo '<td>' . esc_html( $data['singular'] ) . '</td>';
             echo '<td>' . esc_html( $data['plural'] ) . '</td>';
-            echo '<td>' . esc_html( implode( ', ', $data['supports'] ) ) . '</td>';
+            $supports = $managed ? $data['supports'] : get_all_post_type_supports( $slug );
+            $supports = is_array( $supports ) ? array_keys( array_filter( $supports ) ) : array();
+            echo '<td>' . esc_html( $supports ? implode( ', ', $supports ) : __( 'None', 'interslide-codex' ) ) . '</td>';
             echo '<td>' . esc_html( $data['public'] ? __( 'Public', 'interslide-codex' ) : __( 'Private', 'interslide-codex' ) ) . '</td>';
             echo '<td>';
 
-            echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-bottom:8px;">';
-            wp_nonce_field( 'interslide_codex_update_post_type' );
-            echo '<input type="hidden" name="action" value="interslide_codex_update_post_type" />';
-            echo '<input type="hidden" name="original_slug" value="' . esc_attr( $slug ) . '" />';
-            echo '<input type="text" name="slug" value="' . esc_attr( $slug ) . '" placeholder="slug" /> ';
-            echo '<input type="text" name="singular" value="' . esc_attr( $data['singular'] ) . '" placeholder="singular" /> ';
-            echo '<input type="text" name="plural" value="' . esc_attr( $data['plural'] ) . '" placeholder="plural" /> ';
+            if ( $managed ) {
+                echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-bottom:8px;">';
+                wp_nonce_field( 'interslide_codex_update_post_type' );
+                echo '<input type="hidden" name="action" value="interslide_codex_update_post_type" />';
+                echo '<input type="hidden" name="original_slug" value="' . esc_attr( $slug ) . '" />';
+                echo '<input type="text" name="slug" value="' . esc_attr( $slug ) . '" placeholder="slug" /> ';
+                echo '<input type="text" name="singular" value="' . esc_attr( $data['singular'] ) . '" placeholder="singular" /> ';
+                echo '<input type="text" name="plural" value="' . esc_attr( $data['plural'] ) . '" placeholder="plural" /> ';
 
-            foreach ( $support_items as $support_key => $support_label ) {
-                $checked = in_array( $support_key, $data['supports'], true ) ? 'checked' : '';
-                echo '<label style="margin-right:8px;"><input type="checkbox" name="supports[]" value="' . esc_attr( $support_key ) . '" ' . $checked . ' />' . esc_html( $support_label ) . '</label>';
+                foreach ( $support_items as $support_key => $support_label ) {
+                    $checked = in_array( $support_key, $data['supports'], true ) ? 'checked' : '';
+                    echo '<label style="margin-right:8px;"><input type="checkbox" name="supports[]" value="' . esc_attr( $support_key ) . '" ' . $checked . ' />' . esc_html( $support_label ) . '</label>';
+                }
+
+                $public_checked       = $data['public'] ? 'checked' : '';
+                $hierarchical_checked = $data['hierarchical'] ? 'checked' : '';
+                echo '<label style="margin-right:8px;"><input type="checkbox" name="public" value="1" ' . $public_checked . ' />' . esc_html__( 'Public', 'interslide-codex' ) . '</label>';
+                echo '<label style="margin-right:8px;"><input type="checkbox" name="hierarchical" value="1" ' . $hierarchical_checked . ' />' . esc_html__( 'Hierarchical', 'interslide-codex' ) . '</label>';
+                echo '<button class="button" type="submit">' . esc_html__( 'Save', 'interslide-codex' ) . '</button>';
+                echo '</form>';
+
+                echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
+                wp_nonce_field( 'interslide_codex_delete_post_type' );
+                echo '<input type="hidden" name="action" value="interslide_codex_delete_post_type" />';
+                echo '<input type="hidden" name="slug" value="' . esc_attr( $slug ) . '" />';
+                echo '<button class="button button-link-delete" type="submit" onclick="return confirm(\'' . esc_js( __( 'Delete this custom post type?', 'interslide-codex' ) ) . '\')">' . esc_html__( 'Delete', 'interslide-codex' ) . '</button>';
+                echo '</form>';
+            } else {
+                echo esc_html__( 'Managed elsewhere', 'interslide-codex' );
             }
-
-            $public_checked       = $data['public'] ? 'checked' : '';
-            $hierarchical_checked = $data['hierarchical'] ? 'checked' : '';
-            echo '<label style="margin-right:8px;"><input type="checkbox" name="public" value="1" ' . $public_checked . ' />' . esc_html__( 'Public', 'interslide-codex' ) . '</label>';
-            echo '<label style="margin-right:8px;"><input type="checkbox" name="hierarchical" value="1" ' . $hierarchical_checked . ' />' . esc_html__( 'Hierarchical', 'interslide-codex' ) . '</label>';
-            echo '<button class="button" type="submit">' . esc_html__( 'Save', 'interslide-codex' ) . '</button>';
-            echo '</form>';
-
-            echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
-            wp_nonce_field( 'interslide_codex_delete_post_type' );
-            echo '<input type="hidden" name="action" value="interslide_codex_delete_post_type" />';
-            echo '<input type="hidden" name="slug" value="' . esc_attr( $slug ) . '" />';
-            echo '<button class="button button-link-delete" type="submit" onclick="return confirm(\'' . esc_js( __( 'Delete this custom post type?', 'interslide-codex' ) ) . '\')">' . esc_html__( 'Delete', 'interslide-codex' ) . '</button>';
-            echo '</form>';
 
             echo '</td>';
             echo '</tr>';
@@ -222,7 +242,7 @@ function interslide_codex_render_page() {
             echo '<input type="text" name="singular" value="' . esc_attr( $data['singular'] ) . '" placeholder="singular" /> ';
             echo '<input type="text" name="plural" value="' . esc_attr( $data['plural'] ) . '" placeholder="plural" /> ';
 
-            foreach ( $public_types as $post_type_key => $post_type_obj ) {
+            foreach ( $all_post_types as $post_type_key => $post_type_obj ) {
                 $checked = in_array( $post_type_key, $data['object_type'], true ) ? 'checked' : '';
                 echo '<label style="margin-right:8px;"><input type="checkbox" name="object_type[]" value="' . esc_attr( $post_type_key ) . '" ' . $checked . ' />' . esc_html( $post_type_obj->labels->name ) . '</label>';
             }
@@ -257,7 +277,7 @@ function interslide_codex_render_page() {
     echo '<input type="text" name="singular" placeholder="singular" required /> ';
     echo '<input type="text" name="plural" placeholder="plural" required /> ';
     echo '<label style="margin-right:8px;">' . esc_html__( 'Applies to:', 'interslide-codex' ) . '</label>';
-    foreach ( $public_types as $post_type_key => $post_type_obj ) {
+    foreach ( $all_post_types as $post_type_key => $post_type_obj ) {
         echo '<label style="margin-right:8px;"><input type="checkbox" name="object_type[]" value="' . esc_attr( $post_type_key ) . '" />' . esc_html( $post_type_obj->labels->name ) . '</label>';
     }
     echo '<label style="margin-right:8px;"><input type="checkbox" name="public" value="1" checked />' . esc_html__( 'Public', 'interslide-codex' ) . '</label>';
