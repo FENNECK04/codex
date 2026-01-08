@@ -36,11 +36,26 @@ function interslide_codex_render_page() {
         wp_die( esc_html__( 'You do not have permission to access this page.', 'interslide-codex' ) );
     }
 
-    $selected_taxonomy = isset( $_GET['taxonomy'] ) ? sanitize_key( wp_unslash( $_GET['taxonomy'] ) ) : 'category';
-    $taxonomies        = get_taxonomies( array( 'public' => true ), 'objects' );
+    $selected_post_type = isset( $_GET['post_type'] ) ? sanitize_key( wp_unslash( $_GET['post_type'] ) ) : 'post';
+    $post_types         = get_post_types( array( 'public' => true ), 'objects' );
 
-    if ( ! isset( $taxonomies[ $selected_taxonomy ] ) ) {
-        $selected_taxonomy = 'category';
+    if ( ! isset( $post_types[ $selected_post_type ] ) ) {
+        $selected_post_type = 'post';
+    }
+
+    $taxonomies = get_object_taxonomies( $selected_post_type, 'objects' );
+    if ( empty( $taxonomies ) ) {
+        $taxonomies = array();
+    }
+
+    $selected_taxonomy = isset( $_GET['taxonomy'] ) ? sanitize_key( wp_unslash( $_GET['taxonomy'] ) ) : '';
+
+    if ( ! $selected_taxonomy || ! isset( $taxonomies[ $selected_taxonomy ] ) ) {
+        $selected_taxonomy = '';
+        if ( ! empty( $taxonomies ) ) {
+            $first_taxonomy     = array_keys( $taxonomies );
+            $selected_taxonomy = $first_taxonomy[0];
+        }
     }
 
     $notice = isset( $_GET['interslide_notice'] ) ? sanitize_text_field( wp_unslash( $_GET['interslide_notice'] ) ) : '';
@@ -53,22 +68,44 @@ function interslide_codex_render_page() {
 
     echo '<div class="wrap">';
     echo '<h1>' . esc_html__( 'Interslide Codex', 'interslide-codex' ) . '</h1>';
-    echo '<p>' . esc_html__( 'Select a taxonomy to rename or delete terms.', 'interslide-codex' ) . '</p>';
+    echo '<p>' . esc_html__( 'Choose a post type and taxonomy to rename or delete terms.', 'interslide-codex' ) . '</p>';
 
     echo '<form method="get">';
     echo '<input type="hidden" name="page" value="interslide-codex" />';
-    echo '<label for="taxonomy">' . esc_html__( 'Taxonomy:', 'interslide-codex' ) . '</label> ';
-    echo '<select id="taxonomy" name="taxonomy" onchange="this.form.submit()">';
-    foreach ( $taxonomies as $taxonomy_key => $taxonomy_obj ) {
+    echo '<label for="post_type">' . esc_html__( 'Post type:', 'interslide-codex' ) . '</label> ';
+    echo '<select id="post_type" name="post_type" onchange="this.form.submit()">';
+    foreach ( $post_types as $post_type_key => $post_type_obj ) {
         printf(
             '<option value="%s" %s>%s</option>',
-            esc_attr( $taxonomy_key ),
-            selected( $taxonomy_key, $selected_taxonomy, false ),
-            esc_html( $taxonomy_obj->labels->name )
+            esc_attr( $post_type_key ),
+            selected( $post_type_key, $selected_post_type, false ),
+            esc_html( $post_type_obj->labels->name )
         );
+    }
+    echo '</select> ';
+
+    echo '<label for="taxonomy">' . esc_html__( 'Taxonomy:', 'interslide-codex' ) . '</label> ';
+    echo '<select id="taxonomy" name="taxonomy" onchange="this.form.submit()">';
+    if ( empty( $taxonomies ) ) {
+        echo '<option value="">' . esc_html__( 'No taxonomies', 'interslide-codex' ) . '</option>';
+    } else {
+        foreach ( $taxonomies as $taxonomy_key => $taxonomy_obj ) {
+            printf(
+                '<option value="%s" %s>%s</option>',
+                esc_attr( $taxonomy_key ),
+                selected( $taxonomy_key, $selected_taxonomy, false ),
+                esc_html( $taxonomy_obj->labels->name )
+            );
+        }
     }
     echo '</select>';
     echo '</form>';
+
+    if ( empty( $selected_taxonomy ) ) {
+        echo '<p>' . esc_html__( 'This post type has no taxonomies to manage.', 'interslide-codex' ) . '</p>';
+        echo '</div>';
+        return;
+    }
 
     $terms = get_terms(
         array(
@@ -105,6 +142,7 @@ function interslide_codex_render_page() {
             wp_nonce_field( 'interslide_codex_update_term' );
             echo '<input type="hidden" name="action" value="interslide_codex_update_term" />';
             echo '<input type="hidden" name="taxonomy" value="' . esc_attr( $selected_taxonomy ) . '" />';
+            echo '<input type="hidden" name="post_type" value="' . esc_attr( $selected_post_type ) . '" />';
             echo '<input type="hidden" name="term_id" value="' . esc_attr( (string) $term->term_id ) . '" />';
             echo '<input type="text" name="term_name" value="' . esc_attr( $term->name ) . '" />';
             echo '<button class="button" type="submit">' . esc_html__( 'Rename', 'interslide-codex' ) . '</button>';
@@ -114,6 +152,7 @@ function interslide_codex_render_page() {
             wp_nonce_field( 'interslide_codex_delete_term' );
             echo '<input type="hidden" name="action" value="interslide_codex_delete_term" />';
             echo '<input type="hidden" name="taxonomy" value="' . esc_attr( $selected_taxonomy ) . '" />';
+            echo '<input type="hidden" name="post_type" value="' . esc_attr( $selected_post_type ) . '" />';
             echo '<input type="hidden" name="term_id" value="' . esc_attr( (string) $term->term_id ) . '" />';
             echo '<button class="button button-link-delete" type="submit" onclick="return confirm(\'' . esc_js( __( 'Are you sure you want to delete this term?', 'interslide-codex' ) ) . '\')">' . esc_html__( 'Delete', 'interslide-codex' ) . '</button>';
             echo '</form>';
@@ -135,20 +174,21 @@ function interslide_codex_handle_update_term() {
     check_admin_referer( 'interslide_codex_update_term' );
 
     $taxonomy  = isset( $_POST['taxonomy'] ) ? sanitize_key( wp_unslash( $_POST['taxonomy'] ) ) : '';
+    $post_type = isset( $_POST['post_type'] ) ? sanitize_key( wp_unslash( $_POST['post_type'] ) ) : 'post';
     $term_id   = isset( $_POST['term_id'] ) ? absint( $_POST['term_id'] ) : 0;
     $term_name = isset( $_POST['term_name'] ) ? sanitize_text_field( wp_unslash( $_POST['term_name'] ) ) : '';
 
     if ( ! $taxonomy || ! $term_id || '' === $term_name ) {
-        interslide_codex_redirect_with_notice( 'Invalid term data provided.', 'error', $taxonomy );
+        interslide_codex_redirect_with_notice( 'Invalid term data provided.', 'error', $taxonomy, $post_type );
     }
 
     $result = wp_update_term( $term_id, $taxonomy, array( 'name' => $term_name ) );
 
     if ( is_wp_error( $result ) ) {
-        interslide_codex_redirect_with_notice( $result->get_error_message(), 'error', $taxonomy );
+        interslide_codex_redirect_with_notice( $result->get_error_message(), 'error', $taxonomy, $post_type );
     }
 
-    interslide_codex_redirect_with_notice( 'Term renamed successfully.', 'success', $taxonomy );
+    interslide_codex_redirect_with_notice( 'Term renamed successfully.', 'success', $taxonomy, $post_type );
 }
 
 function interslide_codex_handle_delete_term() {
@@ -159,25 +199,27 @@ function interslide_codex_handle_delete_term() {
     check_admin_referer( 'interslide_codex_delete_term' );
 
     $taxonomy = isset( $_POST['taxonomy'] ) ? sanitize_key( wp_unslash( $_POST['taxonomy'] ) ) : '';
+    $post_type = isset( $_POST['post_type'] ) ? sanitize_key( wp_unslash( $_POST['post_type'] ) ) : 'post';
     $term_id  = isset( $_POST['term_id'] ) ? absint( $_POST['term_id'] ) : 0;
 
     if ( ! $taxonomy || ! $term_id ) {
-        interslide_codex_redirect_with_notice( 'Invalid term data provided.', 'error', $taxonomy );
+        interslide_codex_redirect_with_notice( 'Invalid term data provided.', 'error', $taxonomy, $post_type );
     }
 
     $result = wp_delete_term( $term_id, $taxonomy );
 
     if ( is_wp_error( $result ) ) {
-        interslide_codex_redirect_with_notice( $result->get_error_message(), 'error', $taxonomy );
+        interslide_codex_redirect_with_notice( $result->get_error_message(), 'error', $taxonomy, $post_type );
     }
 
-    interslide_codex_redirect_with_notice( 'Term deleted successfully.', 'success', $taxonomy );
+    interslide_codex_redirect_with_notice( 'Term deleted successfully.', 'success', $taxonomy, $post_type );
 }
 
-function interslide_codex_redirect_with_notice( $message, $status, $taxonomy ) {
+function interslide_codex_redirect_with_notice( $message, $status, $taxonomy, $post_type ) {
     $url = add_query_arg(
         array(
             'page'              => 'interslide-codex',
+            'post_type'         => $post_type,
             'taxonomy'          => $taxonomy,
             'interslide_notice' => rawurlencode( $message ),
             'interslide_status' => $status,
