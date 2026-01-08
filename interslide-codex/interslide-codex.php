@@ -11,7 +11,9 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-const INTERSLIDE_CODEX_CAPABILITY = 'manage_categories';
+if ( ! defined( 'INTERSLIDE_CODEX_CAPABILITY' ) ) {
+    define( 'INTERSLIDE_CODEX_CAPABILITY', 'manage_categories' );
+}
 
 add_action( 'admin_menu', 'interslide_codex_register_menu' );
 add_action( 'admin_post_interslide_codex_update_term', 'interslide_codex_handle_update_term' );
