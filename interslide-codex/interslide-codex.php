@@ -21,6 +21,7 @@ const INTERSLIDE_CODEX_OPTION_DISABLED_POST_TYPES = 'interslide_codex_disabled_p
 const INTERSLIDE_CODEX_OPTION_DISABLED_TAXONOMIES = 'interslide_codex_disabled_taxonomies';
 
 add_action( 'init', 'interslide_codex_register_dynamic_types', 0 );
+add_action( 'init', 'interslide_codex_sync_taxonomy_object_types', 11 );
 add_action( 'init', 'interslide_codex_unregister_disabled_types', 100 );
 add_action( 'admin_menu', 'interslide_codex_register_menu' );
 add_filter( 'register_post_type_args', 'interslide_codex_filter_post_type_args', 10, 2 );
@@ -92,6 +93,27 @@ function interslide_codex_unregister_disabled_types() {
     foreach ( $disabled_taxonomies as $slug ) {
         if ( taxonomy_exists( $slug ) ) {
             unregister_taxonomy( $slug );
+        }
+    }
+}
+
+function interslide_codex_sync_taxonomy_object_types() {
+    $taxonomies = interslide_codex_get_taxonomies();
+    $disabled_taxonomies = interslide_codex_get_disabled_taxonomies();
+
+    foreach ( $taxonomies as $slug => $data ) {
+        if ( in_array( $slug, $disabled_taxonomies, true ) ) {
+            continue;
+        }
+
+        if ( ! taxonomy_exists( $slug ) ) {
+            continue;
+        }
+
+        foreach ( $data['object_type'] as $object_type ) {
+            if ( post_type_exists( $object_type ) ) {
+                register_taxonomy_for_object_type( $slug, $object_type );
+            }
         }
     }
 }
@@ -876,3 +898,4 @@ function interslide_codex_redirect_with_notice( $message, $status ) {
     wp_safe_redirect( $url );
     exit;
 }
+
