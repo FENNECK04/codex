@@ -17,28 +17,32 @@ if ( ! defined( 'INTERSLIDE_CODEX_CAPABILITY' ) ) {
 
 const INTERSLIDE_CODEX_OPTION_POST_TYPES = 'interslide_codex_post_types';
 const INTERSLIDE_CODEX_OPTION_TAXONOMIES = 'interslide_codex_taxonomies';
+const INTERSLIDE_CODEX_OPTION_DISABLED_POST_TYPES = 'interslide_codex_disabled_post_types';
+const INTERSLIDE_CODEX_OPTION_DISABLED_TAXONOMIES = 'interslide_codex_disabled_taxonomies';
 
 add_action( 'init', 'interslide_codex_register_dynamic_types', 0 );
+add_action( 'init', 'interslide_codex_unregister_disabled_types', 100 );
 add_action( 'admin_menu', 'interslide_codex_register_menu' );
+add_filter( 'register_post_type_args', 'interslide_codex_filter_post_type_args', 10, 2 );
+add_filter( 'register_taxonomy_args', 'interslide_codex_filter_taxonomy_args', 10, 2 );
 add_action( 'admin_post_interslide_codex_add_post_type', 'interslide_codex_handle_add_post_type' );
 add_action( 'admin_post_interslide_codex_update_post_type', 'interslide_codex_handle_update_post_type' );
 add_action( 'admin_post_interslide_codex_delete_post_type', 'interslide_codex_handle_delete_post_type' );
+add_action( 'admin_post_interslide_codex_enable_post_type', 'interslide_codex_handle_enable_post_type' );
 add_action( 'admin_post_interslide_codex_add_taxonomy', 'interslide_codex_handle_add_taxonomy' );
 add_action( 'admin_post_interslide_codex_update_taxonomy', 'interslide_codex_handle_update_taxonomy' );
 add_action( 'admin_post_interslide_codex_delete_taxonomy', 'interslide_codex_handle_delete_taxonomy' );
+add_action( 'admin_post_interslide_codex_enable_taxonomy', 'interslide_codex_handle_enable_taxonomy' );
 
 function interslide_codex_register_dynamic_types() {
     $post_types = interslide_codex_get_post_types();
+    $disabled_post_types = interslide_codex_get_disabled_post_types();
     foreach ( $post_types as $slug => $data ) {
-        $labels = array(
-            'name'          => $data['plural'],
-            'singular_name' => $data['singular'],
-            'add_new_item'  => sprintf( __( 'Add New %s', 'interslide-codex' ), $data['singular'] ),
-            'edit_item'     => sprintf( __( 'Edit %s', 'interslide-codex' ), $data['singular'] ),
-            'new_item'      => sprintf( __( 'New %s', 'interslide-codex' ), $data['singular'] ),
-            'view_item'     => sprintf( __( 'View %s', 'interslide-codex' ), $data['singular'] ),
-            'search_items'  => sprintf( __( 'Search %s', 'interslide-codex' ), $data['plural'] ),
-        );
+        if ( in_array( $slug, $disabled_post_types, true ) || post_type_exists( $slug ) ) {
+            continue;
+        }
+
+        $labels = interslide_codex_build_post_type_labels( $data['singular'], $data['plural'] );
 
         register_post_type(
             $slug,
@@ -54,17 +58,13 @@ function interslide_codex_register_dynamic_types() {
     }
 
     $taxonomies = interslide_codex_get_taxonomies();
+    $disabled_taxonomies = interslide_codex_get_disabled_taxonomies();
     foreach ( $taxonomies as $slug => $data ) {
-        $labels = array(
-            'name'          => $data['plural'],
-            'singular_name' => $data['singular'],
-            'search_items'  => sprintf( __( 'Search %s', 'interslide-codex' ), $data['plural'] ),
-            'all_items'     => sprintf( __( 'All %s', 'interslide-codex' ), $data['plural'] ),
-            'edit_item'     => sprintf( __( 'Edit %s', 'interslide-codex' ), $data['singular'] ),
-            'update_item'   => sprintf( __( 'Update %s', 'interslide-codex' ), $data['singular'] ),
-            'add_new_item'  => sprintf( __( 'Add New %s', 'interslide-codex' ), $data['singular'] ),
-            'new_item_name' => sprintf( __( 'New %s Name', 'interslide-codex' ), $data['singular'] ),
-        );
+        if ( in_array( $slug, $disabled_taxonomies, true ) || taxonomy_exists( $slug ) ) {
+            continue;
+        }
+
+        $labels = interslide_codex_build_taxonomy_labels( $data['singular'], $data['plural'] );
 
         register_taxonomy(
             $slug,
@@ -78,6 +78,59 @@ function interslide_codex_register_dynamic_types() {
             )
         );
     }
+}
+
+function interslide_codex_unregister_disabled_types() {
+    $disabled_post_types = interslide_codex_get_disabled_post_types();
+    foreach ( $disabled_post_types as $slug ) {
+        if ( post_type_exists( $slug ) ) {
+            unregister_post_type( $slug );
+        }
+    }
+
+    $disabled_taxonomies = interslide_codex_get_disabled_taxonomies();
+    foreach ( $disabled_taxonomies as $slug ) {
+        if ( taxonomy_exists( $slug ) ) {
+            unregister_taxonomy( $slug );
+        }
+    }
+}
+
+function interslide_codex_filter_post_type_args( $args, $post_type ) {
+    $post_types = interslide_codex_get_post_types();
+    if ( ! isset( $post_types[ $post_type ] ) ) {
+        return $args;
+    }
+
+    $data = $post_types[ $post_type ];
+    $labels = interslide_codex_build_post_type_labels( $data['singular'], $data['plural'] );
+    $args['labels'] = isset( $args['labels'] ) && is_array( $args['labels'] )
+        ? array_merge( $args['labels'], $labels )
+        : $labels;
+    $args['public']       = (bool) $data['public'];
+    $args['hierarchical'] = (bool) $data['hierarchical'];
+    $args['supports']     = $data['supports'];
+    $args['show_in_rest'] = true;
+
+    return $args;
+}
+
+function interslide_codex_filter_taxonomy_args( $args, $taxonomy ) {
+    $taxonomies = interslide_codex_get_taxonomies();
+    if ( ! isset( $taxonomies[ $taxonomy ] ) ) {
+        return $args;
+    }
+
+    $data = $taxonomies[ $taxonomy ];
+    $labels = interslide_codex_build_taxonomy_labels( $data['singular'], $data['plural'] );
+    $args['labels'] = isset( $args['labels'] ) && is_array( $args['labels'] )
+        ? array_merge( $args['labels'], $labels )
+        : $labels;
+    $args['public']       = (bool) $data['public'];
+    $args['hierarchical'] = (bool) $data['hierarchical'];
+    $args['show_in_rest'] = true;
+
+    return $args;
 }
 
 function interslide_codex_register_menu() {
@@ -105,20 +158,90 @@ function interslide_codex_render_page() {
         echo '<div class="' . esc_attr( $class ) . '"><p>' . esc_html( $notice ) . '</p></div>';
     }
 
-    $post_types     = interslide_codex_get_post_types();
-    $taxonomies     = interslide_codex_get_taxonomies();
-    $all_post_types = get_post_types( array(), 'objects' );
-    $support_items  = interslide_codex_support_options();
+    $post_types          = interslide_codex_get_post_types();
+    $taxonomies          = interslide_codex_get_taxonomies();
+    $disabled_post_types = interslide_codex_get_disabled_post_types();
+    $disabled_taxonomies = interslide_codex_get_disabled_taxonomies();
+    $all_post_types      = get_post_types( array(), 'objects' );
+    $all_taxonomies      = get_taxonomies( array(), 'objects' );
+    $support_items       = interslide_codex_support_options();
 
     if ( ! is_array( $all_post_types ) ) {
         $all_post_types = array();
     }
 
+    if ( ! is_array( $all_taxonomies ) ) {
+        $all_taxonomies = array();
+    }
+
+    foreach ( $post_types as $slug => $data ) {
+        if ( ! isset( $all_post_types[ $slug ] ) ) {
+            $placeholder = (object) array(
+                'labels' => (object) array(
+                    'singular_name' => $data['singular'],
+                    'name'          => $data['plural'],
+                ),
+                'public' => $data['public'],
+            );
+            $all_post_types[ $slug ] = $placeholder;
+        }
+    }
+
+    foreach ( $disabled_post_types as $slug ) {
+        if ( ! isset( $all_post_types[ $slug ] ) ) {
+            $labels = isset( $post_types[ $slug ] )
+                ? $post_types[ $slug ]
+                : array( 'singular' => $slug, 'plural' => $slug );
+            $placeholder = (object) array(
+                'labels' => (object) array(
+                    'singular_name' => $labels['singular'],
+                    'name'          => $labels['plural'],
+                ),
+                'public' => false,
+            );
+            $all_post_types[ $slug ] = $placeholder;
+        }
+    }
+
+    foreach ( $taxonomies as $slug => $data ) {
+        if ( ! isset( $all_taxonomies[ $slug ] ) ) {
+            $placeholder = (object) array(
+                'labels'      => (object) array(
+                    'singular_name' => $data['singular'],
+                    'name'          => $data['plural'],
+                ),
+                'public'      => $data['public'],
+                'hierarchical'=> $data['hierarchical'],
+                'object_type' => $data['object_type'],
+            );
+            $all_taxonomies[ $slug ] = $placeholder;
+        }
+    }
+
+    foreach ( $disabled_taxonomies as $slug ) {
+        if ( ! isset( $all_taxonomies[ $slug ] ) ) {
+            $labels = isset( $taxonomies[ $slug ] )
+                ? $taxonomies[ $slug ]
+                : array( 'singular' => $slug, 'plural' => $slug );
+            $placeholder = (object) array(
+                'labels'      => (object) array(
+                    'singular_name' => $labels['singular'],
+                    'name'          => $labels['plural'],
+                ),
+                'public'      => false,
+                'hierarchical'=> false,
+                'object_type' => array(),
+            );
+            $all_taxonomies[ $slug ] = $placeholder;
+        }
+    }
+
     ksort( $all_post_types );
+    ksort( $all_taxonomies );
 
     echo '<div class="wrap">';
     echo '<h1>' . esc_html__( 'Interslide Codex', 'interslide-codex' ) . '</h1>';
-    echo '<p>' . esc_html__( 'Create, rename, or delete custom post types and taxonomies. Built-in and third-party items are listed for reference but can only be edited if created here.', 'interslide-codex' ) . '</p>';
+    echo '<p>' . esc_html__( 'Create, rename, disable, or re-enable post types and taxonomies from one place.', 'interslide-codex' ) . '</p>';
     echo '<p><strong>' . esc_html__( 'Field help:', 'interslide-codex' ) . '</strong> ' . esc_html__( 'Slug is the unique identifier used in URLs and code (lowercase, no spaces). Singular is the label for one item (e.g., "Project"). Plural is the label for multiple items (e.g., "Projects").', 'interslide-codex' ) . '</p>';
 
     echo '<h2>' . esc_html__( 'Post Types', 'interslide-codex' ) . '</h2>';
@@ -137,52 +260,64 @@ function interslide_codex_render_page() {
         echo '<tr><td colspan="6">' . esc_html__( 'No post types found.', 'interslide-codex' ) . '</td></tr>';
     } else {
         foreach ( $all_post_types as $slug => $post_type_obj ) {
-            $managed = isset( $post_types[ $slug ] );
-            $data    = $managed ? $post_types[ $slug ] : array(
-                'singular' => $post_type_obj->labels->singular_name,
-                'plural'   => $post_type_obj->labels->name,
-                'supports' => array(),
-                'public'   => ! empty( $post_type_obj->public ),
+            $managed     = isset( $post_types[ $slug ] );
+            $is_disabled = in_array( $slug, $disabled_post_types, true );
+            $supports = get_all_post_type_supports( $slug );
+            $supports = is_array( $supports ) ? array_keys( array_filter( $supports ) ) : array();
+            $data        = $managed ? $post_types[ $slug ] : array(
+                'singular'     => $post_type_obj->labels->singular_name,
+                'plural'       => $post_type_obj->labels->name,
+                'supports'     => $supports,
+                'public'       => ! empty( $post_type_obj->public ),
+                'hierarchical' => ! empty( $post_type_obj->hierarchical ),
             );
             echo '<tr>';
             echo '<td>' . esc_html( $slug ) . '</td>';
             echo '<td>' . esc_html( $data['singular'] ) . '</td>';
             echo '<td>' . esc_html( $data['plural'] ) . '</td>';
-            $supports = $managed ? $data['supports'] : get_all_post_type_supports( $slug );
-            $supports = is_array( $supports ) ? array_keys( array_filter( $supports ) ) : array();
+            $supports = $data['supports'];
             echo '<td>' . esc_html( $supports ? implode( ', ', $supports ) : __( 'None', 'interslide-codex' ) ) . '</td>';
-            echo '<td>' . esc_html( $data['public'] ? __( 'Public', 'interslide-codex' ) : __( 'Private', 'interslide-codex' ) ) . '</td>';
+            if ( $is_disabled ) {
+                echo '<td>' . esc_html__( 'Disabled', 'interslide-codex' ) . '</td>';
+            } else {
+                echo '<td>' . esc_html( $data['public'] ? __( 'Public', 'interslide-codex' ) : __( 'Private', 'interslide-codex' ) ) . '</td>';
+            }
             echo '<td>';
 
-            if ( $managed ) {
+            echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-bottom:8px;">';
+            wp_nonce_field( 'interslide_codex_update_post_type' );
+            echo '<input type="hidden" name="action" value="interslide_codex_update_post_type" />';
+            echo '<input type="hidden" name="original_slug" value="' . esc_attr( $slug ) . '" />';
+            echo '<input type="text" name="slug" value="' . esc_attr( $slug ) . '" placeholder="slug" /> ';
+            echo '<input type="text" name="singular" value="' . esc_attr( $data['singular'] ) . '" placeholder="singular" /> ';
+            echo '<input type="text" name="plural" value="' . esc_attr( $data['plural'] ) . '" placeholder="plural" /> ';
+
+            foreach ( $support_items as $support_key => $support_label ) {
+                $checked = in_array( $support_key, $data['supports'], true ) ? 'checked' : '';
+                echo '<label style="margin-right:8px;"><input type="checkbox" name="supports[]" value="' . esc_attr( $support_key ) . '" ' . $checked . ' />' . esc_html( $support_label ) . '</label>';
+            }
+
+            $public_checked       = $data['public'] ? 'checked' : '';
+            $hierarchical_checked = $data['hierarchical'] ? 'checked' : '';
+            echo '<label style="margin-right:8px;"><input type="checkbox" name="public" value="1" ' . $public_checked . ' />' . esc_html__( 'Public', 'interslide-codex' ) . '</label>';
+            echo '<label style="margin-right:8px;"><input type="checkbox" name="hierarchical" value="1" ' . $hierarchical_checked . ' />' . esc_html__( 'Hierarchical', 'interslide-codex' ) . '</label>';
+            echo '<button class="button" type="submit">' . esc_html__( 'Save', 'interslide-codex' ) . '</button>';
+            echo '</form>';
+
+            if ( $is_disabled ) {
                 echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-bottom:8px;">';
-                wp_nonce_field( 'interslide_codex_update_post_type' );
-                echo '<input type="hidden" name="action" value="interslide_codex_update_post_type" />';
-                echo '<input type="hidden" name="original_slug" value="' . esc_attr( $slug ) . '" />';
-                echo '<input type="text" name="slug" value="' . esc_attr( $slug ) . '" placeholder="slug" /> ';
-                echo '<input type="text" name="singular" value="' . esc_attr( $data['singular'] ) . '" placeholder="singular" /> ';
-                echo '<input type="text" name="plural" value="' . esc_attr( $data['plural'] ) . '" placeholder="plural" /> ';
-
-                foreach ( $support_items as $support_key => $support_label ) {
-                    $checked = in_array( $support_key, $data['supports'], true ) ? 'checked' : '';
-                    echo '<label style="margin-right:8px;"><input type="checkbox" name="supports[]" value="' . esc_attr( $support_key ) . '" ' . $checked . ' />' . esc_html( $support_label ) . '</label>';
-                }
-
-                $public_checked       = $data['public'] ? 'checked' : '';
-                $hierarchical_checked = $data['hierarchical'] ? 'checked' : '';
-                echo '<label style="margin-right:8px;"><input type="checkbox" name="public" value="1" ' . $public_checked . ' />' . esc_html__( 'Public', 'interslide-codex' ) . '</label>';
-                echo '<label style="margin-right:8px;"><input type="checkbox" name="hierarchical" value="1" ' . $hierarchical_checked . ' />' . esc_html__( 'Hierarchical', 'interslide-codex' ) . '</label>';
-                echo '<button class="button" type="submit">' . esc_html__( 'Save', 'interslide-codex' ) . '</button>';
+                wp_nonce_field( 'interslide_codex_enable_post_type' );
+                echo '<input type="hidden" name="action" value="interslide_codex_enable_post_type" />';
+                echo '<input type="hidden" name="slug" value="' . esc_attr( $slug ) . '" />';
+                echo '<button class="button" type="submit">' . esc_html__( 'Enable', 'interslide-codex' ) . '</button>';
                 echo '</form>';
-
+            } else {
                 echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
                 wp_nonce_field( 'interslide_codex_delete_post_type' );
                 echo '<input type="hidden" name="action" value="interslide_codex_delete_post_type" />';
                 echo '<input type="hidden" name="slug" value="' . esc_attr( $slug ) . '" />';
-                echo '<button class="button button-link-delete" type="submit" onclick="return confirm(\'' . esc_js( __( 'Delete this custom post type?', 'interslide-codex' ) ) . '\')">' . esc_html__( 'Delete', 'interslide-codex' ) . '</button>';
+                echo '<button class="button button-link-delete" type="submit" onclick="return confirm(\'' . esc_js( __( 'Disable this post type?', 'interslide-codex' ) ) . '\')">' . esc_html__( 'Disable', 'interslide-codex' ) . '</button>';
                 echo '</form>';
-            } else {
-                echo esc_html__( 'Managed elsewhere', 'interslide-codex' );
             }
 
             echo '</td>';
@@ -210,7 +345,7 @@ function interslide_codex_render_page() {
 
     echo '<hr />';
 
-    echo '<h2>' . esc_html__( 'Custom Taxonomies (created by this plugin)', 'interslide-codex' ) . '</h2>';
+    echo '<h2>' . esc_html__( 'Taxonomies', 'interslide-codex' ) . '</h2>';
     echo '<table class="widefat fixed striped">';
     echo '<thead><tr>';
     echo '<th>' . esc_html__( 'Slug', 'interslide-codex' ) . '</th>';
@@ -222,16 +357,29 @@ function interslide_codex_render_page() {
     echo '</tr></thead>';
     echo '<tbody>';
 
-    if ( empty( $taxonomies ) ) {
-        echo '<tr><td colspan="6">' . esc_html__( 'No custom taxonomies created yet.', 'interslide-codex' ) . '</td></tr>';
+    if ( empty( $all_taxonomies ) ) {
+        echo '<tr><td colspan="6">' . esc_html__( 'No taxonomies found.', 'interslide-codex' ) . '</td></tr>';
     } else {
-        foreach ( $taxonomies as $slug => $data ) {
+        foreach ( $all_taxonomies as $slug => $taxonomy_obj ) {
+            $managed     = isset( $taxonomies[ $slug ] );
+            $is_disabled = in_array( $slug, $disabled_taxonomies, true );
+            $data        = $managed ? $taxonomies[ $slug ] : array(
+                'singular'     => $taxonomy_obj->labels->singular_name,
+                'plural'       => $taxonomy_obj->labels->name,
+                'object_type'  => isset( $taxonomy_obj->object_type ) ? (array) $taxonomy_obj->object_type : array(),
+                'public'       => ! empty( $taxonomy_obj->public ),
+                'hierarchical' => ! empty( $taxonomy_obj->hierarchical ),
+            );
             echo '<tr>';
             echo '<td>' . esc_html( $slug ) . '</td>';
             echo '<td>' . esc_html( $data['singular'] ) . '</td>';
             echo '<td>' . esc_html( $data['plural'] ) . '</td>';
             echo '<td>' . esc_html( implode( ', ', $data['object_type'] ) ) . '</td>';
-            echo '<td>' . esc_html( $data['public'] ? __( 'Public', 'interslide-codex' ) : __( 'Private', 'interslide-codex' ) ) . '</td>';
+            if ( $is_disabled ) {
+                echo '<td>' . esc_html__( 'Disabled', 'interslide-codex' ) . '</td>';
+            } else {
+                echo '<td>' . esc_html( $data['public'] ? __( 'Public', 'interslide-codex' ) : __( 'Private', 'interslide-codex' ) ) . '</td>';
+            }
             echo '<td>';
 
             echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-bottom:8px;">';
@@ -254,12 +402,21 @@ function interslide_codex_render_page() {
             echo '<button class="button" type="submit">' . esc_html__( 'Save', 'interslide-codex' ) . '</button>';
             echo '</form>';
 
-            echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
-            wp_nonce_field( 'interslide_codex_delete_taxonomy' );
-            echo '<input type="hidden" name="action" value="interslide_codex_delete_taxonomy" />';
-            echo '<input type="hidden" name="slug" value="' . esc_attr( $slug ) . '" />';
-            echo '<button class="button button-link-delete" type="submit" onclick="return confirm(\'' . esc_js( __( 'Delete this custom taxonomy?', 'interslide-codex' ) ) . '\')">' . esc_html__( 'Delete', 'interslide-codex' ) . '</button>';
-            echo '</form>';
+            if ( $is_disabled ) {
+                echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-bottom:8px;">';
+                wp_nonce_field( 'interslide_codex_enable_taxonomy' );
+                echo '<input type="hidden" name="action" value="interslide_codex_enable_taxonomy" />';
+                echo '<input type="hidden" name="slug" value="' . esc_attr( $slug ) . '" />';
+                echo '<button class="button" type="submit">' . esc_html__( 'Enable', 'interslide-codex' ) . '</button>';
+                echo '</form>';
+            } else {
+                echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
+                wp_nonce_field( 'interslide_codex_delete_taxonomy' );
+                echo '<input type="hidden" name="action" value="interslide_codex_delete_taxonomy" />';
+                echo '<input type="hidden" name="slug" value="' . esc_attr( $slug ) . '" />';
+                echo '<button class="button button-link-delete" type="submit" onclick="return confirm(\'' . esc_js( __( 'Disable this taxonomy?', 'interslide-codex' ) ) . '\')">' . esc_html__( 'Disable', 'interslide-codex' ) . '</button>';
+                echo '</form>';
+            }
 
             echo '</td>';
             echo '</tr>';
@@ -339,8 +496,9 @@ function interslide_codex_handle_update_post_type() {
     $hierarchy = isset( $_POST['hierarchical'] );
 
     $post_types = interslide_codex_get_post_types();
+    $disabled_post_types = interslide_codex_get_disabled_post_types();
 
-    if ( ! $original || ! isset( $post_types[ $original ] ) ) {
+    if ( ! $original || ( ! isset( $post_types[ $original ] ) && ! post_type_exists( $original ) ) ) {
         interslide_codex_redirect_with_notice( 'Post type not found.', 'error' );
     }
 
@@ -363,9 +521,13 @@ function interslide_codex_handle_update_post_type() {
     if ( $slug !== $original ) {
         $post_types[ $slug ] = $post_types[ $original ];
         unset( $post_types[ $original ] );
+        if ( ! in_array( $original, $disabled_post_types, true ) ) {
+            $disabled_post_types[] = $original;
+        }
     }
 
     interslide_codex_save_post_types( $post_types );
+    interslide_codex_save_disabled_post_types( $disabled_post_types );
     interslide_codex_redirect_with_notice( 'Custom post type updated.', 'success' );
 }
 
@@ -378,14 +540,37 @@ function interslide_codex_handle_delete_post_type() {
 
     $slug       = interslide_codex_clean_slug( $_POST, 'slug' );
     $post_types = interslide_codex_get_post_types();
+    $disabled_post_types = interslide_codex_get_disabled_post_types();
 
-    if ( ! $slug || ! isset( $post_types[ $slug ] ) ) {
+    if ( ! $slug || ( ! isset( $post_types[ $slug ] ) && ! post_type_exists( $slug ) ) ) {
         interslide_codex_redirect_with_notice( 'Post type not found.', 'error' );
     }
 
-    unset( $post_types[ $slug ] );
-    interslide_codex_save_post_types( $post_types );
-    interslide_codex_redirect_with_notice( 'Custom post type deleted.', 'success' );
+    if ( ! in_array( $slug, $disabled_post_types, true ) ) {
+        $disabled_post_types[] = $slug;
+    }
+
+    interslide_codex_save_disabled_post_types( $disabled_post_types );
+    interslide_codex_redirect_with_notice( 'Post type disabled.', 'success' );
+}
+
+function interslide_codex_handle_enable_post_type() {
+    if ( ! current_user_can( INTERSLIDE_CODEX_CAPABILITY ) ) {
+        wp_die( esc_html__( 'You do not have permission to perform this action.', 'interslide-codex' ) );
+    }
+
+    check_admin_referer( 'interslide_codex_enable_post_type' );
+
+    $slug = interslide_codex_clean_slug( $_POST, 'slug' );
+    $disabled_post_types = interslide_codex_get_disabled_post_types();
+
+    if ( ! $slug || ! in_array( $slug, $disabled_post_types, true ) ) {
+        interslide_codex_redirect_with_notice( 'Post type not found.', 'error' );
+    }
+
+    $disabled_post_types = array_values( array_diff( $disabled_post_types, array( $slug ) ) );
+    interslide_codex_save_disabled_post_types( $disabled_post_types );
+    interslide_codex_redirect_with_notice( 'Post type enabled.', 'success' );
 }
 
 function interslide_codex_handle_add_taxonomy() {
@@ -443,8 +628,9 @@ function interslide_codex_handle_update_taxonomy() {
     $hierarchy    = isset( $_POST['hierarchical'] );
 
     $taxonomies = interslide_codex_get_taxonomies();
+    $disabled_taxonomies = interslide_codex_get_disabled_taxonomies();
 
-    if ( ! $original || ! isset( $taxonomies[ $original ] ) ) {
+    if ( ! $original || ( ! isset( $taxonomies[ $original ] ) && ! taxonomy_exists( $original ) ) ) {
         interslide_codex_redirect_with_notice( 'Taxonomy not found.', 'error' );
     }
 
@@ -471,9 +657,13 @@ function interslide_codex_handle_update_taxonomy() {
     if ( $slug !== $original ) {
         $taxonomies[ $slug ] = $taxonomies[ $original ];
         unset( $taxonomies[ $original ] );
+        if ( ! in_array( $original, $disabled_taxonomies, true ) ) {
+            $disabled_taxonomies[] = $original;
+        }
     }
 
     interslide_codex_save_taxonomies( $taxonomies );
+    interslide_codex_save_disabled_taxonomies( $disabled_taxonomies );
     interslide_codex_redirect_with_notice( 'Custom taxonomy updated.', 'success' );
 }
 
@@ -486,14 +676,37 @@ function interslide_codex_handle_delete_taxonomy() {
 
     $slug       = interslide_codex_clean_slug( $_POST, 'slug' );
     $taxonomies = interslide_codex_get_taxonomies();
+    $disabled_taxonomies = interslide_codex_get_disabled_taxonomies();
 
-    if ( ! $slug || ! isset( $taxonomies[ $slug ] ) ) {
+    if ( ! $slug || ( ! isset( $taxonomies[ $slug ] ) && ! taxonomy_exists( $slug ) ) ) {
         interslide_codex_redirect_with_notice( 'Taxonomy not found.', 'error' );
     }
 
-    unset( $taxonomies[ $slug ] );
-    interslide_codex_save_taxonomies( $taxonomies );
-    interslide_codex_redirect_with_notice( 'Custom taxonomy deleted.', 'success' );
+    if ( ! in_array( $slug, $disabled_taxonomies, true ) ) {
+        $disabled_taxonomies[] = $slug;
+    }
+
+    interslide_codex_save_disabled_taxonomies( $disabled_taxonomies );
+    interslide_codex_redirect_with_notice( 'Taxonomy disabled.', 'success' );
+}
+
+function interslide_codex_handle_enable_taxonomy() {
+    if ( ! current_user_can( INTERSLIDE_CODEX_CAPABILITY ) ) {
+        wp_die( esc_html__( 'You do not have permission to perform this action.', 'interslide-codex' ) );
+    }
+
+    check_admin_referer( 'interslide_codex_enable_taxonomy' );
+
+    $slug = interslide_codex_clean_slug( $_POST, 'slug' );
+    $disabled_taxonomies = interslide_codex_get_disabled_taxonomies();
+
+    if ( ! $slug || ! in_array( $slug, $disabled_taxonomies, true ) ) {
+        interslide_codex_redirect_with_notice( 'Taxonomy not found.', 'error' );
+    }
+
+    $disabled_taxonomies = array_values( array_diff( $disabled_taxonomies, array( $slug ) ) );
+    interslide_codex_save_disabled_taxonomies( $disabled_taxonomies );
+    interslide_codex_redirect_with_notice( 'Taxonomy enabled.', 'success' );
 }
 
 function interslide_codex_get_post_types() {
@@ -540,6 +753,57 @@ function interslide_codex_get_taxonomies() {
 
 function interslide_codex_save_taxonomies( $taxonomies ) {
     update_option( INTERSLIDE_CODEX_OPTION_TAXONOMIES, $taxonomies );
+}
+
+function interslide_codex_get_disabled_post_types() {
+    $disabled = get_option( INTERSLIDE_CODEX_OPTION_DISABLED_POST_TYPES, array() );
+    if ( ! is_array( $disabled ) ) {
+        return array();
+    }
+
+    return array_values( array_unique( array_filter( $disabled ) ) );
+}
+
+function interslide_codex_save_disabled_post_types( $disabled ) {
+    update_option( INTERSLIDE_CODEX_OPTION_DISABLED_POST_TYPES, array_values( array_unique( $disabled ) ) );
+}
+
+function interslide_codex_get_disabled_taxonomies() {
+    $disabled = get_option( INTERSLIDE_CODEX_OPTION_DISABLED_TAXONOMIES, array() );
+    if ( ! is_array( $disabled ) ) {
+        return array();
+    }
+
+    return array_values( array_unique( array_filter( $disabled ) ) );
+}
+
+function interslide_codex_save_disabled_taxonomies( $disabled ) {
+    update_option( INTERSLIDE_CODEX_OPTION_DISABLED_TAXONOMIES, array_values( array_unique( $disabled ) ) );
+}
+
+function interslide_codex_build_post_type_labels( $singular, $plural ) {
+    return array(
+        'name'          => $plural,
+        'singular_name' => $singular,
+        'add_new_item'  => sprintf( __( 'Add New %s', 'interslide-codex' ), $singular ),
+        'edit_item'     => sprintf( __( 'Edit %s', 'interslide-codex' ), $singular ),
+        'new_item'      => sprintf( __( 'New %s', 'interslide-codex' ), $singular ),
+        'view_item'     => sprintf( __( 'View %s', 'interslide-codex' ), $singular ),
+        'search_items'  => sprintf( __( 'Search %s', 'interslide-codex' ), $plural ),
+    );
+}
+
+function interslide_codex_build_taxonomy_labels( $singular, $plural ) {
+    return array(
+        'name'          => $plural,
+        'singular_name' => $singular,
+        'search_items'  => sprintf( __( 'Search %s', 'interslide-codex' ), $plural ),
+        'all_items'     => sprintf( __( 'All %s', 'interslide-codex' ), $plural ),
+        'edit_item'     => sprintf( __( 'Edit %s', 'interslide-codex' ), $singular ),
+        'update_item'   => sprintf( __( 'Update %s', 'interslide-codex' ), $singular ),
+        'add_new_item'  => sprintf( __( 'Add New %s', 'interslide-codex' ), $singular ),
+        'new_item_name' => sprintf( __( 'New %s Name', 'interslide-codex' ), $singular ),
+    );
 }
 
 function interslide_codex_support_options() {
